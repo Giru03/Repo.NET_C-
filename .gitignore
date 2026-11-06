@@ -1,0 +1,12 @@
+# Visual Studio
+.vs/
+bin/
+obj/
+
+# Usuario
+*.user
+*.suo
+
+# Build
+[Dd]ebug/
+[Rr]elease/

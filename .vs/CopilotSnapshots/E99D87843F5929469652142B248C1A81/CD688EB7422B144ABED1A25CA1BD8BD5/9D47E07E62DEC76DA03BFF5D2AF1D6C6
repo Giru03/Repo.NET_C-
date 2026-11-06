@@ -1,0 +1,59 @@
+﻿namespace Trabajo_Janier
+{
+    public class LoginForm : Form
+    {
+        public LoginForm()
+        {
+            Text = "Login";
+            Width = 420;
+            Height = 540;
+            StartPosition = FormStartPosition.CenterScreen;
+            BackColor = Tema.FondoGeneral;
+            FormBorderStyle = FormBorderStyle.FixedSingle;
+            MaximizeBox = false;
+            MinimizeBox = false;
+
+            var titulo = new Label
+            {
+                Text = "Iniciar sesión",
+                Font = new Font("Segoe UI", 18F, FontStyle.Bold),
+                ForeColor = Tema.TextoOscuro,
+                AutoSize = true,
+                Location = new Point(30, 30)
+            };
+
+            var descripcion = new Label
+            {
+                Text = "Accede al sistema Agrosoft SENA",
+                Font = new Font("Segoe UI", 10F),
+                ForeColor = Color.FromArgb(90, 102, 94),
+                AutoSize = true,
+                Location = new Point(30, 70)
+            };
+
+            var boton = new Button
+            {
+                Text = "Continuar",
+                Width = 150,
+                Height = 42,
+                Location = new Point(135, 240),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Tema.VerdePrincipal,
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 10F, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            boton.FlatAppearance.BorderSize = 0;
+            boton.Click += (_, _) =>
+            {
+                var principal = new Form1();
+                principal.Show();
+                Close();
+            };
+
+            Controls.Add(titulo);
+            Controls.Add(descripcion);
+            Controls.Add(boton);
+        }
+    }
+}

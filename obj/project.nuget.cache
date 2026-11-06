@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "dgSpecHash": "6L5Z9ln88EE=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\PC\\Desktop\\C#\\Trabajo_Janier\\Trabajo_Janier.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\PC\\.nuget\\packages\\mqttnet\\4.3.7.1207\\mqttnet.4.3.7.1207.nupkg.sha512"
+  ],
+  "logs": []
+}

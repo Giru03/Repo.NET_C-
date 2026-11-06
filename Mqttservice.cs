@@ -10,8 +10,8 @@ namespace Trabajo_Janier
 {
     public class DatosSensor
     {
-        public float Temperatura { get; set; }
-        public float Humedad { get; set; }
+        public float? Temperatura { get; set; }
+        public float? Humedad { get; set; }
     }
 
     public class MqttService

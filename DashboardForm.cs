@@ -19,13 +19,15 @@ namespace Trabajo_Janier
         private readonly MonitoringChartPanel grafico;
         private readonly System.Windows.Forms.Timer temporizadorSimulado;
         private readonly Random aleatorio = new();
+        private readonly AlertaService alertaService;
         private float temperaturaActual = 26.4F;
         private float humedadActual = 68F;
         private double faseSimulacion;
         private readonly MqttService _mqtt = new();
 
-        public DashboardForm(bool iniciarSimulacion = false)
+        public DashboardForm(AlertaService alertaService, bool iniciarSimulacion = false)
         {
+            this.alertaService = alertaService;
             Text = "Dashboard";
             BackColor = Tema.FondoGeneral;
             FormBorderStyle = FormBorderStyle.None;
@@ -74,7 +76,20 @@ namespace Trabajo_Janier
             temporizadorSimulado.Tick += (_, _) => GenerarLecturaSimulada();
             ConfigurarSimulacion(iniciarSimulacion);
 
-            _mqtt.OnLecturaRecibida += datos => AgregarLectura(datos.Temperatura, datos.Humedad);
+            _mqtt.OnLecturaRecibida += datos =>
+            {
+                if (datos.Temperatura.HasValue)
+                {
+                    alertaService.Evaluar("Temperatura", datos.Temperatura.Value);
+                }
+
+                if (datos.Humedad.HasValue)
+                {
+                    alertaService.Evaluar("Humedad", datos.Humedad.Value);
+                }
+
+                AgregarLectura(datos.Temperatura, datos.Humedad);
+            };
             _mqtt.OnEstadoCambiado += estado => ActualizarEstadoMqtt(estado);
         }
 
@@ -111,17 +126,29 @@ namespace Trabajo_Janier
             });
         }
 
-        public void AgregarLectura(float temp, float hum)
+        public void AgregarLectura(float? temp, float? hum)
         {
             EjecutarEnUi(() =>
             {
-                temperaturaActual = temp;
-                humedadActual = hum;
-                valorTemperatura.Text = Formatear(temp, " °C");
-                valorHumedad.Text = Formatear(hum, " %");
-                detalleTemperatura.Text = "Promedio actual";
-                detalleHumedad.Text = "Suelo y ambiente";
-                grafico.AgregarPunto(temp, hum);
+                if (temp.HasValue)
+                {
+                    temperaturaActual = temp.Value;
+                    valorTemperatura.Text = Formatear(temp.Value, " °C");
+                    detalleTemperatura.Text = "Promedio actual";
+                }
+
+                if (hum.HasValue)
+                {
+                    humedadActual = hum.Value;
+                    valorHumedad.Text = Formatear(hum.Value, " %");
+                    detalleHumedad.Text = "Suelo y ambiente";
+                }
+
+                valorTemperatura.ForeColor = alertaService.EstaFueraDeRango("Temperatura")
+                    ? Tema.Rojo : Tema.TextoOscuro;
+                valorHumedad.ForeColor = alertaService.EstaFueraDeRango("Humedad")
+                    ? Tema.Rojo : Tema.TextoOscuro;
+                grafico.AgregarPunto(temp ?? float.NaN, hum ?? float.NaN);
             });
         }
 
@@ -468,7 +495,8 @@ namespace Trabajo_Janier
                 graphics.DrawString("Lecturas recientes", textoFont, textoBrush,
                     area.Left + area.Width / 2F - 38, area.Bottom + 8);
 
-                if (temperaturas.Count == 0)
+                if (!temperaturas.Exists(valor => !float.IsNaN(valor))
+                    && !humedades.Exists(valor => !float.IsNaN(valor)))
                 {
                     using var esperaBrush = new SolidBrush(Tema.TextoMuted);
                     const string mensaje = "Esperando lecturas MQTT...";
@@ -509,26 +537,29 @@ namespace Trabajo_Janier
                     EndCap = LineCap.Round
                 };
                 using var puntoBrush = new SolidBrush(color);
-                var puntos = new PointF[valores.Count];
+                PointF? puntoAnterior = null;
 
                 for (int i = 0; i < valores.Count; i++)
                 {
+                    if (float.IsNaN(valores[i]))
+                    {
+                        puntoAnterior = null;
+                        continue;
+                    }
+
                     float x = valores.Count == 1
                         ? area.Left + area.Width / 2F
                         : area.Left + area.Width * i / (valores.Count - 1F);
                     float proporcion = Math.Clamp(valores[i] / maximo, 0F, 1F);
                     float y = area.Bottom - area.Height * proporcion;
-                    puntos[i] = new PointF(x, y);
-                }
+                    var punto = new PointF(x, y);
+                    if (puntoAnterior.HasValue)
+                    {
+                        graphics.DrawLine(pen, puntoAnterior.Value, punto);
+                    }
 
-                if (puntos.Length > 1)
-                {
-                    graphics.DrawLines(pen, puntos);
-                }
-
-                foreach (PointF punto in puntos)
-                {
                     graphics.FillEllipse(puntoBrush, punto.X - 3, punto.Y - 3, 6, 6);
+                    puntoAnterior = punto;
                 }
             }
         }

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Text;
 using System.Globalization;
 using System.Threading.Tasks;
 using System.Windows.Forms;
@@ -10,16 +11,31 @@ namespace Trabajo_Janier
 {
     public partial class Form1 : Form
     {
+        private const int EspacioIconoTexto = 3;
+
         private readonly Panel sidebar;
         private readonly Panel areaContenido;
         private readonly Panel hostVistas;
         private readonly Label tituloVista;
         private readonly string usuarioActual;
+        private readonly Font fuenteIconos;
+        private readonly ToolTip toolTipMenu = new();
         private readonly DashboardForm dashboard;
+        private readonly AlertaService alertaService;
+        private readonly AlertasForm alertasForm;
         private readonly List<Button> botonesMenu = new();
         private readonly Dictionary<string, Form> formularios = new();
+        private readonly HashSet<Button> botonesEnHover = new();
         private Button? botonActivo;
+        private Button? botonAlertas;
+        private Button? botonCerrarSesion;
+        private TableLayoutPanel? layoutMarca;
+        private Panel? logoMarca;
+        private Panel? panelMarca;
+        private Label? tituloMarca;
         private Form? formularioActivo;
+        private int alertasNoLeidas;
+        private bool sidebarColapsado;
 
         public Form1(string usuario = "Admin")
         {
@@ -33,6 +49,7 @@ namespace Trabajo_Janier
             BackColor = Tema.FondoGeneral;
             DoubleBuffered = true;
             MinimumSize = new Size(1100, 680);
+            fuenteIconos = new Font(ObtenerFuenteIconos(), 16F, FontStyle.Regular);
 
             sidebar = CrearSidebar();
             areaContenido = CrearAreaContenido(out hostVistas, out tituloVista);
@@ -40,9 +57,13 @@ namespace Trabajo_Janier
             Controls.Add(areaContenido);
             Controls.Add(sidebar);
 
-            dashboard = new DashboardForm();
+            alertaService = new AlertaService();
+            dashboard = new DashboardForm(alertaService);
+            alertasForm = new AlertasForm(alertaService);
             formularios["Dashboard"] = dashboard;
+            formularios["Alertas"] = alertasForm;
             formularios["Conexiones"] = CrearVista("Conexiones", "Conexiones activas y servicios");
+            alertaService.OnAlerta += AlertaRecibida;
 
             AbrirFormulario(formularios["Dashboard"]);
             SeleccionarBoton(botonesMenu[0]);
@@ -63,7 +84,7 @@ namespace Trabajo_Janier
 
         private Panel CrearSidebar()
         {
-            var panelSidebar = new Panel
+            var panelSidebar = new PanelConDobleBuffer
             {
                 Dock = DockStyle.Left,
                 Width = 248,
@@ -97,14 +118,16 @@ namespace Trabajo_Janier
             {
                 Dock = DockStyle.Fill,
                 ColumnCount = 1,
-                RowCount = 2,
+                RowCount = 3,
                 BackColor = Tema.Blanco,
                 Padding = new Padding(12, 10, 12, 10),
                 Margin = new Padding(0)
             };
+            menuSidebar = menu;
             menu.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
 
-            string[] opciones = { "Dashboard", "Conexiones" };
+            string[] opciones = { "Dashboard", "Alertas", "Conexiones" };
+            menu.RowCount = opciones.Length;
             for (int i = 0; i < opciones.Length; i++)
             {
                 menu.RowStyles.Add(new RowStyle(SizeType.Absolute, 49F));
@@ -119,25 +142,30 @@ namespace Trabajo_Janier
                 BackColor = Tema.BordeSuave,
                 Margin = new Padding(16, 0, 16, 0)
             };
-            var botonCerrar = new Button
+            var botonCerrar = new BotonSinFoco
             {
                 Dock = DockStyle.Fill,
-                Text = "   Cerrar sesión",
+                Text = string.Empty,
+                AccessibleName = "Cerrar sesión",
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
-                ForeColor = Tema.Rojo,
+                ForeColor = Tema.TextoOscuro,
                 BackColor = Tema.Blanco,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(16, 0, 0, 0),
-                Cursor = Cursors.Hand
+                TextAlign = ContentAlignment.MiddleCenter,
+                Cursor = Cursors.Hand,
+                TabStop = false,
+                UseVisualStyleBackColor = false
             };
             botonCerrar.FlatAppearance.BorderSize = 0;
-            botonCerrar.FlatAppearance.MouseOverBackColor = Color.FromArgb(253, 242, 242);
+            botonCerrar.FlatAppearance.MouseOverBackColor = Tema.VerdeSuave;
+            botonCerrar.Paint += (_, e) => DibujarBotonCerrar(botonCerrar, e.Graphics);
             botonCerrar.Click += (_, _) =>
             {
                 var loginForm = new LoginForm();
                 Application.Exit();
             };
+            botonCerrarSesion = botonCerrar;
+            toolTipMenu.SetToolTip(botonCerrar, "Cerrar sesión");
 
             layout.Controls.Add(panelMarca, 0, 0);
             layout.Controls.Add(menu, 0, 1);
@@ -210,6 +238,10 @@ namespace Trabajo_Janier
                 TextAlign = ContentAlignment.MiddleLeft,
                 Padding = new Padding(8, 0, 0, 0)
             };
+            layoutMarca = layout;
+            logoMarca = logo;
+            panelMarca = panel;
+            tituloMarca = titulo;
 
             layout.Controls.Add(logo, 0, 0);
             layout.Controls.Add(titulo, 1, 0);
@@ -219,23 +251,31 @@ namespace Trabajo_Janier
 
         private Button CrearBotonMenu(string texto, string claveFormulario)
         {
-            var boton = new Button
+            var boton = new BotonSinFoco
             {
                 Dock = DockStyle.Top,
                 Height = 45,
-                Text = "   " + texto,
+                Text = string.Empty,
+                AccessibleName = texto,
+                Tag = claveFormulario,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI", 10.5F, FontStyle.Bold),
                 ForeColor = Tema.TextoOscuro,
                 BackColor = Tema.Blanco,
-                TextAlign = ContentAlignment.MiddleLeft,
-                Padding = new Padding(12, 0, 0, 0),
+                TextAlign = ContentAlignment.MiddleCenter,
                 Cursor = Cursors.Hand,
                 UseVisualStyleBackColor = false,
+                TabStop = false,
                 Margin = new Padding(0, 2, 0, 2)
             };
             boton.FlatAppearance.BorderSize = 0;
             boton.FlatAppearance.MouseDownBackColor = Tema.VerdeSuave;
+            if (claveFormulario == "Alertas")
+            {
+                botonAlertas = boton;
+            }
+            ActualizarEstiloBoton(boton);
+
             boton.Click += (_, _) =>
             {
                 if (formularios.TryGetValue(claveFormulario, out var formHijo))
@@ -246,23 +286,16 @@ namespace Trabajo_Janier
             };
             boton.MouseEnter += (_, _) =>
             {
-                if (boton != botonActivo)
-                {
-                    boton.BackColor = Tema.VerdeSuave;
-                }
+                botonesEnHover.Add(boton);
+                ActualizarEstiloBoton(boton);
             };
             boton.MouseLeave += (_, _) =>
             {
-                boton.BackColor = boton == botonActivo ? Tema.VerdeSuave : Tema.Blanco;
+                botonesEnHover.Remove(boton);
+                ActualizarEstiloBoton(boton);
             };
-            boton.Paint += (_, e) =>
-            {
-                if (boton == botonActivo)
-                {
-                    using var brush = new SolidBrush(Tema.VerdeOscuro);
-                    e.Graphics.FillRectangle(brush, 0, 8, 3, Math.Max(0, boton.Height - 16));
-                }
-            };
+            boton.Paint += (_, e) => DibujarBotonMenu(boton, texto, claveFormulario, e.Graphics);
+            toolTipMenu.SetToolTip(boton, texto);
 
             return boton;
         }
@@ -293,14 +326,37 @@ namespace Trabajo_Janier
             var layoutBarra = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill,
-                ColumnCount = 2,
+                ColumnCount = 3,
                 RowCount = 1,
                 BackColor = Tema.Blanco,
                 Margin = new Padding(0)
             };
+            layoutBarra.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 44F));
             layoutBarra.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             layoutBarra.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             layoutBarra.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+            var hamburguesa = new BotonSinFoco
+            {
+                Anchor = AnchorStyles.None,
+                Size = new Size(36, 36),
+                Text = "\uE700",
+                Font = new Font(fuenteIconos.FontFamily, 13F, FontStyle.Regular),
+                FlatStyle = FlatStyle.Flat,
+                ForeColor = Tema.TextoOscuro,
+                BackColor = Tema.Blanco,
+                Cursor = Cursors.Hand,
+                UseVisualStyleBackColor = false,
+                TabStop = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Margin = new Padding(0, 0, 8, 0),
+                AccessibleName = "Alternar menú lateral"
+            };
+            hamburguesa.FlatAppearance.BorderSize = 0;
+            hamburguesa.FlatAppearance.MouseOverBackColor = Tema.VerdeSuave;
+            hamburguesa.FlatAppearance.MouseDownBackColor = Tema.VerdeSuave;
+            hamburguesa.Click += (_, _) => AlternarSidebar();
+            toolTipMenu.SetToolTip(hamburguesa, "Alternar menú lateral");
 
             titulo = new Label
             {
@@ -320,8 +376,9 @@ namespace Trabajo_Janier
                 TextAlign = ContentAlignment.MiddleRight,
                 Margin = new Padding(0, 0, 0, 0)
             };
-            layoutBarra.Controls.Add(titulo, 0, 0);
-            layoutBarra.Controls.Add(estadoSesion, 1, 0);
+            layoutBarra.Controls.Add(hamburguesa, 0, 0);
+            layoutBarra.Controls.Add(titulo, 1, 0);
+            layoutBarra.Controls.Add(estadoSesion, 2, 0);
             barraSuperior.Controls.Add(layoutBarra);
 
             host = new Panel
@@ -438,18 +495,22 @@ namespace Trabajo_Janier
 
         private void SeleccionarBoton(Button boton)
         {
+            botonActivo = boton;
             foreach (var item in botonesMenu)
             {
-                item.BackColor = item == boton ? Tema.VerdeSuave : Tema.Blanco;
+                ActualizarEstiloBoton(item);
                 item.Invalidate();
             }
-
-            botonActivo = boton;
-            botonActivo.Invalidate();
         }
 
         public void AbrirFormulario(Form formHijo)
         {
+            if (formHijo == alertasForm)
+            {
+                alertasNoLeidas = 0;
+                ActualizarTextoBotonAlertas();
+            }
+
             if (formularioActivo == formHijo)
             {
                 tituloVista.Text = formHijo.Text;
@@ -474,6 +535,245 @@ namespace Trabajo_Janier
             formHijo.BringToFront();
             formularioActivo = formHijo;
             tituloVista.Text = formHijo.Text;
+        }
+
+        private void AlertaRecibida(Alerta alerta)
+        {
+            if (IsDisposed || !IsHandleCreated)
+            {
+                return;
+            }
+
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    if (IsDisposed || !IsHandleCreated || formularioActivo == alertasForm)
+                    {
+                        return;
+                    }
+
+                    alertasNoLeidas++;
+                    ActualizarTextoBotonAlertas();
+                }));
+            }
+            catch (InvalidOperationException)
+            {
+            }
+        }
+
+        private void ActualizarTextoBotonAlertas()
+        {
+            if (botonAlertas != null)
+            {
+                botonAlertas.AccessibleName = alertasNoLeidas > 0
+                    ? $"Alertas ({alertasNoLeidas})"
+                    : "Alertas";
+                ActualizarEstiloBoton(botonAlertas);
+                botonAlertas.Invalidate();
+            }
+        }
+
+        private void ActualizarEstiloBoton(Button b)
+        {
+            bool esAlertasPendientes = b == botonAlertas
+                && alertasNoLeidas > 0
+                && formularioActivo != alertasForm;
+            bool esActivo = b == botonActivo;
+            bool hover = botonesEnHover.Contains(b);
+
+            if (esAlertasPendientes)
+            {
+                b.BackColor = hover ? OscurecerColor(Tema.Rojo, 0.84F) : Tema.Rojo;
+                b.ForeColor = Tema.Blanco;
+                b.FlatAppearance.MouseOverBackColor = OscurecerColor(Tema.Rojo, 0.84F);
+            }
+            else if (esActivo)
+            {
+                b.BackColor = Tema.VerdeSuave;
+                b.ForeColor = Tema.TextoOscuro;
+                b.FlatAppearance.MouseOverBackColor = Tema.VerdeSuave;
+            }
+            else
+            {
+                b.BackColor = hover ? Tema.VerdeSuave : Tema.Blanco;
+                b.ForeColor = Tema.TextoOscuro;
+                b.FlatAppearance.MouseOverBackColor = Tema.VerdeSuave;
+            }
+
+            b.FlatAppearance.MouseDownBackColor = b == botonAlertas && esAlertasPendientes
+                ? OscurecerColor(Tema.Rojo, 0.84F)
+                : Tema.VerdeSuave;
+        }
+
+        private void DibujarBotonMenu(Button boton, string texto, string clave, Graphics graphics)
+        {
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            if (boton == botonActivo)
+            {
+                using var marcador = new SolidBrush(Tema.VerdeOscuro);
+                graphics.FillRectangle(marcador, 0, 8, 3, Math.Max(0, boton.Height - 16));
+            }
+
+            string glifo = clave switch
+            {
+                "Dashboard" => "\uE80F",
+                "Alertas" => "\uE7BA",
+                "Conexiones" => "\uE701",
+                _ => string.Empty
+            };
+            using var pincel = new SolidBrush(boton.ForeColor);
+            SizeF tamanoGlifo = graphics.MeasureString(glifo, fuenteIconos);
+            float glifoX = sidebarColapsado
+                ? (boton.ClientSize.Width - tamanoGlifo.Width) / 2F
+                : 18F;
+            float glifoY = (boton.ClientSize.Height - tamanoGlifo.Height) / 2F;
+            graphics.DrawString(glifo, fuenteIconos, pincel, glifoX, glifoY);
+
+            if (!sidebarColapsado)
+            {
+                string etiqueta = texto;
+                if (boton == botonAlertas && alertasNoLeidas > 0)
+                {
+                    etiqueta += $" ({alertasNoLeidas})";
+                }
+
+                using var fuenteTexto = new Font(boton.Font, FontStyle.Bold);
+                float textoX = glifoX + tamanoGlifo.Width + EspacioIconoTexto;
+                graphics.DrawString(etiqueta, fuenteTexto, pincel, textoX,
+                    (boton.ClientSize.Height - graphics.MeasureString(etiqueta, fuenteTexto).Height) / 2F);
+            }
+            else if (boton == botonAlertas && alertasNoLeidas > 0)
+            {
+                string conteo = alertasNoLeidas > 99 ? "99+" : alertasNoLeidas.ToString(CultureInfo.InvariantCulture);
+                using var fondoInsignia = new SolidBrush(Tema.Blanco);
+                using var fuenteInsignia = new Font("Segoe UI", 7F, FontStyle.Bold);
+                SizeF tamanoConteo = graphics.MeasureString(conteo, fuenteInsignia);
+                float ancho = Math.Max(16F, tamanoConteo.Width + 6F);
+                float x = boton.ClientSize.Width - ancho - 3F;
+                const float y = 2F;
+                graphics.FillEllipse(fondoInsignia, x, y, ancho, 16F);
+                using var textoInsignia = new SolidBrush(Tema.Rojo);
+                graphics.DrawString(conteo, fuenteInsignia, textoInsignia,
+                    x + (ancho - tamanoConteo.Width) / 2F,
+                    y + (16F - tamanoConteo.Height) / 2F);
+            }
+        }
+
+        private void DibujarBotonCerrar(Button boton, Graphics graphics)
+        {
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            using var pincel = new SolidBrush(boton.ForeColor);
+            string glifo = "\uE7E8";
+            SizeF tamanoGlifo = graphics.MeasureString(glifo, fuenteIconos);
+            if (sidebarColapsado)
+            {
+                graphics.DrawString(glifo, fuenteIconos, pincel,
+                    (boton.ClientSize.Width - tamanoGlifo.Width) / 2F,
+                    (boton.ClientSize.Height - tamanoGlifo.Height) / 2F);
+                return;
+            }
+
+            graphics.DrawString(glifo, fuenteIconos, pincel, 18F,
+                (boton.ClientSize.Height - tamanoGlifo.Height) / 2F);
+            using var fuenteTexto = new Font(boton.Font, FontStyle.Bold);
+            const string etiqueta = "Cerrar sesión";
+            float textoX = 18F + tamanoGlifo.Width + EspacioIconoTexto;
+            graphics.DrawString(etiqueta, fuenteTexto, pincel, textoX,
+                (boton.ClientSize.Height - graphics.MeasureString(etiqueta, fuenteTexto).Height) / 2F);
+        }
+
+        private void AlternarSidebar()
+        {
+            sidebarColapsado = !sidebarColapsado;
+            sidebar.Width = sidebarColapsado ? 72 : 248;
+            sidebar.Padding = Padding.Empty;
+
+            if (layoutMarca != null && logoMarca != null && tituloMarca != null)
+            {
+                layoutMarca.ColumnCount = 2;
+                layoutMarca.ColumnStyles.Clear();
+                layoutMarca.ColumnStyles.Add(new ColumnStyle(
+                    sidebarColapsado ? SizeType.Percent : SizeType.Absolute,
+                    sidebarColapsado ? 100F : 50F));
+                layoutMarca.ColumnStyles.Add(new ColumnStyle(
+                    SizeType.Percent,
+                    sidebarColapsado ? 0F : 100F));
+
+                logoMarca.Anchor = AnchorStyles.None;
+                tituloMarca.Visible = !sidebarColapsado;
+                layoutMarca.SetColumn(logoMarca, 0);
+                layoutMarca.SetColumn(tituloMarca, 1);
+            }
+
+            if (panelMarca != null)
+            {
+                panelMarca.Padding = sidebarColapsado
+                    ? Padding.Empty
+                    : new Padding(18, 16, 12, 12);
+            }
+
+            foreach (Button boton in botonesMenu)
+            {
+                boton.TextAlign = ContentAlignment.MiddleCenter;
+                boton.Invalidate();
+                toolTipMenu.SetToolTip(boton, sidebarColapsado ? (string)boton.Tag! : string.Empty);
+            }
+            if (menuSidebar != null)
+            {
+                menuSidebar.Padding = sidebarColapsado
+                    ? new Padding(6, 10, 6, 10)
+                    : new Padding(12, 10, 12, 10);
+            }
+
+            if (botonCerrarSesion != null)
+            {
+                toolTipMenu.SetToolTip(botonCerrarSesion, sidebarColapsado ? "Cerrar sesión" : string.Empty);
+                botonCerrarSesion.Invalidate();
+            }
+
+            menuSidebar?.PerformLayout();
+            sidebar.Invalidate(true);
+            hostVistas.PerformLayout();
+            hostVistas.Invalidate(true);
+        }
+
+        private TableLayoutPanel? menuSidebar;
+
+        private static string ObtenerFuenteIconos()
+        {
+            using var fuentes = new InstalledFontCollection();
+            foreach (FontFamily familia in fuentes.Families)
+            {
+                if (familia.Name == "Segoe MDL2 Assets")
+                {
+                    return familia.Name;
+                }
+            }
+
+            return "Segoe UI Symbol";
+        }
+
+        private static Color OscurecerColor(Color color, float factor)
+        {
+            return Color.FromArgb(color.A,
+                (int)(color.R * factor),
+                (int)(color.G * factor),
+                (int)(color.B * factor));
+        }
+
+        private sealed class PanelConDobleBuffer : Panel
+        {
+            public PanelConDobleBuffer()
+            {
+                DoubleBuffered = true;
+                ResizeRedraw = true;
+            }
+        }
+
+        private sealed class BotonSinFoco : Button
+        {
+            protected override bool ShowFocusCues => false;
         }
     }
 }
